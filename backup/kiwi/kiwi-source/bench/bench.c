@@ -70,36 +70,37 @@ void _print_environment()
 
 int main(int argc,char** argv)
 {
-	long int read_count;
-	long int write_count;
-
-	int read_threads;
+	long int count;
 
 	srand(time(NULL));
-	if (argc < 6) {
-		fprintf(stderr,"Usage: db-bench write <count> read <threads> <count> <random>\n");
+	if (argc < 3) {
+		fprintf(stderr,"Usage: db-bench <write | read> <count>\n");
 		exit(1);
 	}
 	
-	if (strcmp(argv[1], "write") != 0) {
-		fprintf(stderr,"Usage: db-bench write <count> read <threads> <count> <random>\n");
+	if (strcmp(argv[1], "write") == 0) {
+		int r = 0;
+
+		count = atoi(argv[2]);
+		_print_header(count);
+		_print_environment();
+		if (argc == 4)
+			r = 1;
+		_write_test(count, r);
+	} else if (strcmp(argv[1], "read") == 0) {
+		int r = 0;
+
+		count = atoi(argv[2]);
+		_print_header(count);
+		_print_environment();
+		if (argc == 4)
+			r = 1;
+		
+		_read_test(count, r);
+	} else {
+		fprintf(stderr,"Usage: db-bench <write | read> <count> <random>\n");
 		exit(1);
 	}
 
-	int r = 0;
-
-	write_count = atoi(argv[2]);
-	if (strcmp(argv[3], "read") != 0){
-		fprintf(stderr,"Usage: db-bench write <count> read <threads> <count> <random>\n");
-		exit(1);
-	}
-	read_threads = atoi(argv[4]);
-	read_count = atoi(argv[5]);
-	_print_header(write_count);
-	_print_header(read_count);
-	_print_environment();
-	if (argc == 7)
-		r = 1;
-	_operation_manager(write_count, read_threads, read_count, r);
 	return 1;
 }
