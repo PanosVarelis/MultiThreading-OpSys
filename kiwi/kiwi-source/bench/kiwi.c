@@ -6,11 +6,6 @@
 
 #define DATAS ("testdb")
 
-pthread_mutex_t write_lock;
-pthread_mutex_t read_lock;
-pthread_cond_t write_signal;
-pthread_cond_t read_signal;
-
 struct thread_arg {
 	long int start;
 	long int end;
@@ -23,11 +18,18 @@ struct thread_arg {
 };
 
 void _operation_manager(long int write_count, int read_threads, long int read_count, int r){
-	if (pthread_mutex_init(&write_lock, NULL) != 0)
-		perror("Mutex init has failed.\n");
-
-	if (pthread_cond_init(&signal, NULL) != 0)
-		perror("Mutex signal init has failed.\n");
+	pthread_t wr_t;
+	pthread_t rd_t[read_threads];
+	pthread_create(&wr_t, NULL, (void*)_write_test, write_count);
+	for (int i = 0; i < read_threads; i++) {
+		if(pthread_create(&rd_t[i], NULL, (void*)_read_test, read_count) != 0)
+			perror("Failed to create thread");
+	}
+	for(int i = 0; i < read_threads; i++) {
+		if(pthread_join(rd_t[i], NULL) != 0)
+			perror("Failed to join threads");
+	}
+	pthread_join(wr_t, NULL);
 }
 
 void _write_test(long int count, int r)
@@ -63,10 +65,7 @@ void _write_test(long int count, int r)
 		sv.length = VSIZE;
 		sv.mem = val;
 
-		pthread_mutex_lock(&write_lock);
 		db_add(db, &sk, &sv);
-		pthread_mutex_unlock(&write_lock);
-		pthread_cond_signal(&write_signal);
 
 		if ((i % 10000) == 0) {
 			fprintf(stderr,"random write finished %d ops%30s\r", 
