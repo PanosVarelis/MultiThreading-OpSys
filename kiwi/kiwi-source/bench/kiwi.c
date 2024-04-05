@@ -13,7 +13,7 @@ struct thread_arg {
 	Variant sk;
 	Variant sv;
 	char *key;
-	int *found;
+	int found;
 	int r;
 	double cost;
 };
@@ -87,7 +87,6 @@ void _multi_read_test(struct thread_arg* args)
 	char *key = args->key;
 	int start = args->start;
 	int end = args->end;
-	int found = args->found;
 	int r = args->r;
 
 	pthread_t tid = pthread_self();
@@ -149,7 +148,7 @@ double* _read_test(long int count, int r, int t_num)
 
 	for(t = 0; t < t_num; t++) {
 		thread_args[t].key = key;
-		thread_args[t].found = &found;
+		thread_args[t].found = 0;
 		thread_args[t].db = db;
 		thread_args[t].r = r;
 		thread_args[t].start = t * (count / t_num);
@@ -168,6 +167,9 @@ double* _read_test(long int count, int r, int t_num)
 	db_close(db);
 
 	end = get_ustime_sec();
+	for(int t = 0; t < t_num; t++){
+		found += thread_args[t].found;
+	}
 	cost = end - start;
 	result[0] = (double)found;
 	result[1] = cost;
