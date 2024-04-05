@@ -6,6 +6,10 @@
 #include "variant.h"
 #include "memtable.h"
 #include "merger.h"
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdbool.h>
+
 
 typedef struct _db {
 //    char basedir[MAX_FILENAME];
@@ -17,6 +21,8 @@ typedef struct _db {
 DB* db_open(const char *basedir);
 DB* db_open_ex(const char *basedir, uint64_t cache_size);
 
+void __init(void);
+void __destroy(void);
 void db_close(DB* self);
 int db_add(DB* self, Variant* key, Variant* value);
 int db_get(DB* self, Variant* key, Variant* value);

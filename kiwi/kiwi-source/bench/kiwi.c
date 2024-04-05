@@ -15,30 +15,24 @@ struct thread_arg {
 	char *key;
 	int *found;
 	int r;
+	double cost;
 };
 
-void _operation_manager(long int write_count, int read_threads, long int read_count, int r){
-	pthread_t wr_t;
-	pthread_t rd_t[read_threads];
-	pthread_create(&wr_t, NULL, (void*)_write_test, write_count);
-	for (int i = 0; i < read_threads; i++) {
-		if(pthread_create(&rd_t[i], NULL, (void*)_read_test, read_count) != 0)
-			perror("Failed to create thread");
-	}
-	for(int i = 0; i < read_threads; i++) {
-		if(pthread_join(rd_t[i], NULL) != 0)
-			perror("Failed to join threads");
-	}
-	pthread_join(wr_t, NULL);
-}
+struct write_test_arg {
+	long int write_count;
+	int r;
+	double cost;
+};
 
-void _write_test(long int count, int r)
+void _write_test(struct write_test_arg* args)
 {	
 	int i;
-	double cost;
 	long long start,end;
 	Variant sk, sv;
 	DB* db;
+
+	long int count = args->write_count;
+	int r = args->r;
 
 	char key[KSIZE + 1];
 	char val[VSIZE + 1];
@@ -47,6 +41,8 @@ void _write_test(long int count, int r)
 	memset(key, 0, KSIZE + 1);
 	memset(val, 0, VSIZE + 1);
 	memset(sbuf, 0, 1024);
+
+	pthread_t wr_tid = pthread_self();
 
 	db = db_open(DATAS);
 
@@ -57,7 +53,7 @@ void _write_test(long int count, int r)
 			_random_key(key, KSIZE);
 		else
 			snprintf(key, KSIZE, "key-%d", i);
-		fprintf(stderr, "%d adding %s\n", i, key);
+		fprintf(stderr, "Thread %ld: %d adding %s\n", wr_tid, i, key);
 		snprintf(val, VSIZE, "val-%d", i);
 
 		sk.length = KSIZE;
@@ -79,16 +75,8 @@ void _write_test(long int count, int r)
 	db_close(db);
 
 	end = get_ustime_sec();
-	cost = end -start;
-
-	printf(LINE);
-	printf("|Random-Write	(done:%ld): %.6f sec/op; %.1f writes/sec(estimated); cost:%.3f(sec);\n"
-		,count, (double)(cost / count)
-		,(double)(count / cost)
-		,cost);
+	args->cost = end -start;
 }
-
-
 
 void _multi_read_test(struct thread_arg* args)
 {
@@ -99,7 +87,7 @@ void _multi_read_test(struct thread_arg* args)
 	char *key = args->key;
 	int start = args->start;
 	int end = args->end;
-	int *found = args->found;
+	int found = args->found;
 	int r = args->r;
 
 	pthread_t tid = pthread_self();
@@ -137,17 +125,19 @@ void _multi_read_test(struct thread_arg* args)
 		}
 	}
 	printf("start: %d, end: %d", start, end);
-	*found += count;
+	args->found += count;
 }
 
 
-void _read_test(long int count, int r, int t_num)
+double* _read_test(long int count, int r, int t_num)
 {
 	int found = 0;
-	double cost;
+	double cost = 0.0;
 	long long start,end;
 	char key[KSIZE + 1];
 	DB* db;
+	
+	double* result = (double*)malloc(2*sizeof(double));
 
 	db = db_open(DATAS);
 	start = get_ustime_sec();
@@ -179,11 +169,40 @@ void _read_test(long int count, int r, int t_num)
 
 	end = get_ustime_sec();
 	cost = end - start;
-	printf(LINE);
-	printf("|Random-Read	(done:%ld, found:%d): %.6f sec/op; %.1f reads /sec(estimated); cost:%.3f(sec)\n",
-		count, found,
-		(double)(cost / count),
-		(double)(count / cost),
-		cost);
+	result[0] = (double)found;
+	result[1] = cost;
+	return result;
 }
 
+void _operation_manager(long int write_count, int read_threads, long int read_count, int r){
+	pthread_t wr_t;
+	__init();
+	double* res;
+	double cost;
+
+	struct write_test_arg wr_arg;
+	wr_arg.write_count = write_count;
+	wr_arg.r = r;
+
+	pthread_create(&wr_t, NULL, (void*)_write_test, &wr_arg);
+	
+	res = _read_test(read_count, r, read_threads);
+	
+	pthread_join(wr_t, NULL);
+
+	cost = wr_arg.cost;
+	printf(LINE);
+	printf("|Random-Write	(done:%ld): %.6f sec/op; %.1f writes/sec(estimated); cost:%.3f(sec);\n"
+		,write_count, (double)(cost / write_count)
+		,(double)(write_count / cost)
+		,cost);
+	
+	printf(LINE);
+	printf("|Random-Read	(done:%ld, found:%d): %.6f sec/op; %.1f reads /sec(estimated); cost:%.3f(sec)\n",
+		read_count, (int)res[0],
+		(double)(res[1] / read_count),
+		(double)(read_count / res[1]),
+		res[1]);
+	__destroy();
+	free(res);
+}

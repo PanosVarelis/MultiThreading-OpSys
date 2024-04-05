@@ -5,15 +5,14 @@
 #include "utils.h"
 #include "log.h"
 
-//PTHREAD DECLARATION & INITIALISATION
-pthread_mutex_t write_lock = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t writecount_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t read_lock = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t read_lock2 = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t readcount_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t write_signal =  PTHREAD_COND_INITIALIZER;
-pthread_cond_t read_signal = PTHREAD_COND_INITIALIZER;
+//PTHREAD DECLARATION
 int readcount, writecount = 0;
+pthread_mutex_t mutexBuf;
+sem_t readcount_mutex; 
+sem_t writecount_mutex;
+sem_t read_mutex;
+sem_t read_mutex2;
+sem_t write_mutex;
 
 
 DB* db_open_ex(const char* basedir, uint64_t cache_size)
@@ -55,18 +54,46 @@ void db_close(DB *self)
     free(self);
 }
 
+void __wait(sem_t sem){
+    sem_wait(&sem);
+}
+
+void __signal(sem_t sem){
+    sem_post(&sem);
+}
+
+void __init(void){
+    sem_init(&writecount_mutex, 0, 1);
+    sem_init(&write_mutex, 0, 1);
+    sem_init(&readcount_mutex, 0, 1);
+    sem_init(&read_mutex, 0, 1);
+    sem_init(&read_mutex2, 0, 1);
+    pthread_mutex_init(&mutexBuf, NULL);
+}
+
+void __destroy(void){
+    sem_destroy(&writecount_mutex);
+    sem_destroy(&write_mutex);
+    sem_destroy(&readcount_mutex);
+    sem_destroy(&read_mutex);
+    sem_destroy(&read_mutex2);
+    pthread_mutex_destroy(&mutexBuf);
+}
+
 int db_add(DB* self, Variant* key, Variant* value)
 {
-    int res;
-    pthread_mutex_lock(&write_lock);
-    pthread_mutex_lock(&writecount_mutex);
-    pthread_cond_wait(&write_signal, &writecount_mutex);
-    writecount++;
-    if (writecount == 1)
-        pthread_cond_wait(&read_signal, &read_lock);
-        //BLOCK READERS IF WRITING
-    pthread_cond_signal(&writecount_mutex);
-    pthread_cond_wait(&write_signal, &write_lock);
+    int add;
+    __wait(writecount_mutex);
+    writecount ++;
+    if(writecount == 1){
+        // if first writer arrives
+        // block readers
+        __wait(read_mutex);
+    }
+    __signal(writecount_mutex);
+    __wait(write_mutex);
+    pthread_mutex_lock(&mutexBuf);
+    // critical area
     if (memtable_needs_compaction(self->memtable))
     {
         INFO("Starting compaction of the memtable after %d insertions and %d deletions",
@@ -74,48 +101,52 @@ int db_add(DB* self, Variant* key, Variant* value)
         sst_merge(self->sst, self->memtable);
         memtable_reset(self->memtable);
     }
-    res = memtable_add(self->memtable, key, value);
-    pthread_cond_signal(&write_lock);
-    pthread_cond_wait(&write_signal, &writecount_mutex);
-    writecount--;
-    if (writecount == 0)
-        pthread_cond_signal(&read_signal);
-        //RELEASE READERS
-    pthread_mutex_unlock(&writecount_mutex);
-    pthread_mutex_unlock(&write_lock);
-    pthread_cond_signal(&writecount_mutex);
-    return res;
+    add = memtable_add(self->memtable, key, value);
+    // critical area end
+    pthread_mutex_unlock(&mutexBuf);
+    __signal(write_mutex);
+    __wait(writecount_mutex);
+    writecount --;
+    if(writecount == 0){
+        // if first writer finishes
+        // unblock readers
+        __signal(read_mutex);
+    }
+    __signal(writecount_mutex);
+    return add;
 }
 
 int db_get(DB* self, Variant* key, Variant* value)
 {
-    int res;
-    pthread_mutex_lock(&read_lock2);
-    pthread_mutex_lock(&read_lock);
-    pthread_mutex_lock(&readcount_mutex);
-    pthread_cond_wait(&read_signal, &read_lock2);
-    pthread_cond_wait(&read_signal, &read_lock);
-    pthread_cond_wait(&read_signal, &readcount_mutex);
-    readcount++;
-    if(readcount == 1)
-        pthread_cond_wait(&write_signal, &write_lock);
-        //BLOCK WRITERS IF READING
-    pthread_cond_signal(&readcount_mutex);
-    pthread_cond_signal(&read_lock);
-    pthread_cond_signal(&read_lock2);
+    int get;
+    __wait(read_mutex2);
+    __wait(read_mutex);
+    __wait(readcount_mutex);
+    readcount ++;
+    if(readcount == 0){
+        // if first reader arrives 
+        // block writer
+        __wait(write_mutex);
+    }
+    __signal(readcount_mutex);
+    __signal(read_mutex);
+    __signal(read_mutex2);
+    pthread_mutex_lock(&mutexBuf);
+    // critical area
     if (memtable_get(self->memtable->list, key, value) == 1)
         return 1;
-    res = sst_get(self->sst, key, value);
-    pthread_cond_wait(&read_signal, &readcount_mutex);
-    readcount--;
-    if(readcount == 0)
-        pthread_cond_signal(&write_signal);
-        //RELEASE WRITERS
-    pthread_mutex_unlock(&readcount_mutex);
-    pthread_mutex_unlock(&read_lock2);
-    pthread_mutex_unlock(&read_lock);
-    pthread_cond_signal(&readcount_mutex);
-    return res;
+    get = sst_get(self->sst, key, value);
+    // critical area end
+    pthread_mutex_unlock(&mutexBuf);
+    __wait(readcount_mutex);
+    readcount --;
+    if(readcount == 0){
+        // if last reader finishes
+        // unblock writer
+        __signal(write_mutex);
+    }
+    __signal(readcount_mutex);
+    return get;
 }
 
 int db_remove(DB* self, Variant* key)
