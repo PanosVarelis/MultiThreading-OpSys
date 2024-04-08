@@ -8,12 +8,14 @@
 // STRUCT TO PASS ARGS TO EACH THREAD
 // USED FOR READ OP
 struct thread_arg {
-	long int start;
+	long int *i;
 	long int end;
 	DB* db;
 	int found;
 	int r;
 	double cost;
+	long long time;
+	long int thread_found;
 };
 // STRUCT TO PASS ARGS TO WRITER
 struct write_test_arg {
@@ -85,15 +87,17 @@ void _threaded_read_test(struct thread_arg* args)
 	char key[KSIZE + 1];
 
 	DB* db = args->db;
-	int start = args->start;
 	int end = args->end;
 	int r = args->r;
 
-	pthread_t tid = pthread_self();			// USED TO DIFFERENTIATE THREADS IN OUTPUT
+	//pthread_t tid = pthread_self();			// USED TO DIFFERENTIATE THREADS IN OUTPUT
 	int ret;
 	int i;
 	int count = 0;
-	for (i = start; i < end; i++) {
+	long long begin = get_ustime_sec();
+	while (*(args->i) < end) {
+		i = *(args->i);
+		*(args->i) += 1;
 		memset(key, 0, KSIZE + 1);
 
 		/* if you want to test random write, use the following */
@@ -101,7 +105,7 @@ void _threaded_read_test(struct thread_arg* args)
 			_random_key(key, KSIZE);
 		else
 			snprintf(key, KSIZE, "key-%d", i);
-		fprintf(stderr, "Thread %ld: %d searching %s\n", tid, i, key);
+		//fprintf(stderr, "Thread %ld: %d searching %s\n", tid, i, key);
 		sk.length = KSIZE;
 		sk.mem = key;
 
@@ -110,6 +114,7 @@ void _threaded_read_test(struct thread_arg* args)
 		if (ret) {
 			//db_free_data(sv.mem);
 			count++;
+			args->thread_found += 1;
 		} else {
 			INFO("not found key#%s", 
 					sk.mem);
@@ -123,6 +128,8 @@ void _threaded_read_test(struct thread_arg* args)
 			fflush(stderr);
 		}
 	}
+	long long finish = get_ustime_sec();
+	args->time = finish - begin;
 	args->found += count;		// USED TO CALCULATE SUM OF ITEMS FOUND, IN OPERATION MANAGER, READ OP
 }
 
@@ -130,6 +137,7 @@ void _threaded_read_test(struct thread_arg* args)
 // AND INITIALISES EACH READER ARGS
 double* _read_test(long int count, int r, int t_num)
 {
+	long int i = 0;
 	int found = 0;
 	double cost = 0.0;
 	long long start,end;
@@ -150,7 +158,8 @@ double* _read_test(long int count, int r, int t_num)
 		thread_args[t].found = 0;							// FOR EACH NEW READER
 		thread_args[t].db = db;								//
 		thread_args[t].r = r;								//
-		thread_args[t].start = t * (count / t_num);			// EACH NEW READER HAS CERTAIN RANGE OF KEYS
+		thread_args[t].i = &i;			// EACH NEW READER HAS CERTAIN RANGE OF KEYS
+		thread_args[t].thread_found = 0;
 		if (t == t_num - 1)
 			thread_args[t].end = count;
 		else
@@ -168,6 +177,7 @@ double* _read_test(long int count, int r, int t_num)
 	end = get_ustime_sec();
 	for(int t = 0; t < t_num; t++){
 		found += thread_args[t].found;
+		printf("Thread: %ld, Time: %lld, keys found: %ld\n", id[t], thread_args[t].time, thread_args[t].thread_found);
 	}
 	cost = end - start;
 	result[0] = (double)found;			// USED IN OPERATION MANAGER TO CALCULATE SUM OF KEYS FOUND

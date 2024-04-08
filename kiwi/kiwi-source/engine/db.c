@@ -72,7 +72,6 @@ void __init(void){
     sem_init(&readcount_mutex, 0, 1);
     sem_init(&read_mutex, 0, 1);
     sem_init(&read_mutex2, 0, 1);
-    pthread_mutex_init(&mutexBuf, NULL);
 }
 
 // DESTROY SEM's AND MUTEX AFTER END
@@ -83,10 +82,9 @@ void __destroy(void){
     sem_destroy(&readcount_mutex);
     sem_destroy(&read_mutex);
     sem_destroy(&read_mutex2);
-    pthread_mutex_destroy(&mutexBuf);
 }
 
-// PRODUCER-CONSUMER IMPLEMENTATION FOR WRITE OP
+// READER-WRITER IMPLEMENTATION FOR WRITE OP
 // WRITERS HAVE PRIORITY
 int db_add(DB* self, Variant* key, Variant* value)
 {
@@ -98,7 +96,7 @@ int db_add(DB* self, Variant* key, Variant* value)
     }                                           
     __signal(writecount_mutex);                 
     __wait(write_mutex);
-    pthread_mutex_lock(&mutexBuf);              // ENTERING CRITICAL AREA, LOCKING MUTEX
+    //critical area
     if (memtable_needs_compaction(self->memtable))
     {
         INFO("Starting compaction of the memtable after %d insertions and %d deletions",
@@ -107,7 +105,7 @@ int db_add(DB* self, Variant* key, Variant* value)
         memtable_reset(self->memtable);
     }
     add = memtable_add(self->memtable, key, value);
-    pthread_mutex_unlock(&mutexBuf);            // END OF CRITICAL AREA, UNLOCKING..
+    //critical area stop
     __signal(write_mutex);                      // SAME AS DONE FOR ABOVE, SAFE WR MUTEX DE-INCREMENT
     __wait(writecount_mutex);
     writecount --;                              
@@ -120,7 +118,7 @@ int db_add(DB* self, Variant* key, Variant* value)
     return add;
 }
 
-// PRODUCER-CONSUMER IMPLEMENTATION FOR READ OP
+// READER-WRITER IMPLEMENTATION FOR READ OP
 int db_get(DB* self, Variant* key, Variant* value)
 {
     int get;
@@ -136,13 +134,9 @@ int db_get(DB* self, Variant* key, Variant* value)
     __signal(readcount_mutex);
     __signal(read_mutex);
     __signal(read_mutex2);
-    pthread_mutex_lock(&mutexBuf);              // ENTERING CRITICAL AREA, LOCKING MUTEX..
-    // critical area
     if (memtable_get(self->memtable->list, key, value) == 1)
         return 1;
     get = sst_get(self->sst, key, value);
-    // critical area end
-    pthread_mutex_unlock(&mutexBuf);            // EXITING CRITICAL AREA, UNLOCKING..
     __wait(readcount_mutex);
     readcount --;
     if(readcount == 0){                         // SAME AS ABOVE, SAFE RD MUTEX DE-INCREMENT
