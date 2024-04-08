@@ -98,7 +98,7 @@ int db_add(DB* self, Variant* key, Variant* value)
     }                                           
     __signal(writecount_mutex);                 
     __wait(write_mutex);
-    pthread_mutex_lock(&mutexBuf);              // ENTERING CRITICAL AREA, LOCKING MUTEX FOR SST COMPACTION
+    pthread_mutex_lock(&mutexBuf);              // ENTERING CRITICAL AREA, LOCKING MUTEX
     if (memtable_needs_compaction(self->memtable))
     {
         INFO("Starting compaction of the memtable after %d insertions and %d deletions",
@@ -106,8 +106,8 @@ int db_add(DB* self, Variant* key, Variant* value)
         sst_merge(self->sst, self->memtable);
         memtable_reset(self->memtable);
     }
-    pthread_mutex_unlock(&mutexBuf);            // END OF COMPACTION, UNLOCKING..
     add = memtable_add(self->memtable, key, value);
+    pthread_mutex_unlock(&mutexBuf);            // END OF CRITICAL AREA, UNLOCKING..
     __signal(write_mutex);                      // SAME AS DONE FOR ABOVE, SAFE WR MUTEX DE-INCREMENT
     __wait(writecount_mutex);
     writecount --;                              

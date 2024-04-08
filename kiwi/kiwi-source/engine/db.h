@@ -6,7 +6,7 @@
 #include "variant.h"
 #include "memtable.h"
 #include "merger.h"
-#include <semaphore.h>
+#include <semaphore.h>                     //ADDED LIBRARY FOR SEMAPHORES
 
 
 typedef struct _db {
@@ -19,8 +19,8 @@ typedef struct _db {
 DB* db_open(const char *basedir);
 DB* db_open_ex(const char *basedir, uint64_t cache_size);
 
-void __init(void);
-void __destroy(void);
+void __init(void);                        // NEW FUNCTIONS DECLERATIONS
+void __destroy(void);                     //
 void db_close(DB* self);
 int db_add(DB* self, Variant* key, Variant* value);
 int db_get(DB* self, Variant* key, Variant* value);

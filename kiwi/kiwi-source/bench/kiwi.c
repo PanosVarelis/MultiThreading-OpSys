@@ -11,9 +11,6 @@ struct thread_arg {
 	long int start;
 	long int end;
 	DB* db;
-	Variant sk;
-	Variant sv;
-	char *key;
 	int found;
 	int r;
 	double cost;
@@ -81,13 +78,13 @@ void _write_test(struct write_test_arg* args)
 }
 
 // READ OP 
-void _multi_read_test(struct thread_arg* args)
+void _threaded_read_test(struct thread_arg* args)
 {
 	Variant sk;
 	Variant sv;
+	char key[KSIZE + 1];
 
 	DB* db = args->db;
-	char *key = args->key;
 	int start = args->start;
 	int end = args->end;
 	int r = args->r;
@@ -136,7 +133,7 @@ double* _read_test(long int count, int r, int t_num)
 	int found = 0;
 	double cost = 0.0;
 	long long start,end;
-	char key[KSIZE + 1];
+	
 	DB* db;
 	
 	double* result = (double*)malloc(2*sizeof(double));
@@ -149,8 +146,7 @@ double* _read_test(long int count, int r, int t_num)
 
 	struct thread_arg thread_args[t_num];
 
-	for(t = 0; t < t_num; t++) {
-		thread_args[t].key = key;							// INITIALISE ARGUEMENTS 
+	for(t = 0; t < t_num; t++) {						    // INITIALISE ARGUEMENTS 
 		thread_args[t].found = 0;							// FOR EACH NEW READER
 		thread_args[t].db = db;								//
 		thread_args[t].r = r;								//
@@ -159,7 +155,7 @@ double* _read_test(long int count, int r, int t_num)
 			thread_args[t].end = count;
 		else
 			thread_args[t].end = (t + 1) * (count / t_num);
-		if (pthread_create(&id[t], NULL, (void*)_multi_read_test, &thread_args[t]) != 0)
+		if (pthread_create(&id[t], NULL, (void*)_threaded_read_test, &thread_args[t]) != 0)
 			perror("Failed to create thread");
 	}
 	for(t = 0; t < t_num; t++) {
@@ -179,6 +175,7 @@ double* _read_test(long int count, int r, int t_num)
 	return result;
 }
 
+// HANDLES THE READ AND RIGHT OPERATIONS
 void _operation_manager(long int write_count, int read_threads, long int read_count, int r){
 	pthread_t wr_t;
 	__init();
