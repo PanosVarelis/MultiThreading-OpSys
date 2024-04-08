@@ -2,10 +2,11 @@
 #include "../engine/db.h"
 #include "../engine/variant.h"
 #include "bench.h"
-#include <pthread.h>
 
 #define DATAS ("testdb")
 
+// STRUCT TO PASS ARGS TO EACH THREAD
+// USED FOR READ OP
 struct thread_arg {
 	long int start;
 	long int end;
@@ -17,13 +18,14 @@ struct thread_arg {
 	int r;
 	double cost;
 };
-
+// STRUCT TO PASS ARGS TO WRITER
 struct write_test_arg {
 	long int write_count;
 	int r;
 	double cost;
 };
 
+// WRITE OP
 void _write_test(struct write_test_arg* args)
 {	
 	int i;
@@ -42,7 +44,7 @@ void _write_test(struct write_test_arg* args)
 	memset(val, 0, VSIZE + 1);
 	memset(sbuf, 0, 1024);
 
-	pthread_t wr_tid = pthread_self();
+	pthread_t wr_tid = pthread_self();			// USED TO DIFFERENTIATE THE THREADS IN OUTPUT
 
 	db = db_open(DATAS);
 
@@ -75,9 +77,10 @@ void _write_test(struct write_test_arg* args)
 	db_close(db);
 
 	end = get_ustime_sec();
-	args->cost = end -start;
+	args->cost = end - start;				// USED IN OPERATION MANAGER, TO CALC SUM OF COSTS, WRITE OP
 }
 
+// READ OP 
 void _multi_read_test(struct thread_arg* args)
 {
 	Variant sk;
@@ -89,7 +92,7 @@ void _multi_read_test(struct thread_arg* args)
 	int end = args->end;
 	int r = args->r;
 
-	pthread_t tid = pthread_self();
+	pthread_t tid = pthread_self();			// USED TO DIFFERENTIATE THREADS IN OUTPUT
 	int ret;
 	int i;
 	int count = 0;
@@ -123,11 +126,11 @@ void _multi_read_test(struct thread_arg* args)
 			fflush(stderr);
 		}
 	}
-	printf("start: %d, end: %d", start, end);
-	args->found += count;
+	args->found += count;		// USED TO CALCULATE SUM OF ITEMS FOUND, IN OPERATION MANAGER, READ OP
 }
 
-
+// CREATE'S NUMBER OF READERS
+// AND INITIALISES EACH READER ARGS
 double* _read_test(long int count, int r, int t_num)
 {
 	int found = 0;
@@ -147,11 +150,11 @@ double* _read_test(long int count, int r, int t_num)
 	struct thread_arg thread_args[t_num];
 
 	for(t = 0; t < t_num; t++) {
-		thread_args[t].key = key;
-		thread_args[t].found = 0;
-		thread_args[t].db = db;
-		thread_args[t].r = r;
-		thread_args[t].start = t * (count / t_num);
+		thread_args[t].key = key;							// INITIALISE ARGUEMENTS 
+		thread_args[t].found = 0;							// FOR EACH NEW READER
+		thread_args[t].db = db;								//
+		thread_args[t].r = r;								//
+		thread_args[t].start = t * (count / t_num);			// EACH NEW READER HAS CERTAIN RANGE OF KEYS
 		if (t == t_num - 1)
 			thread_args[t].end = count;
 		else
@@ -171,8 +174,8 @@ double* _read_test(long int count, int r, int t_num)
 		found += thread_args[t].found;
 	}
 	cost = end - start;
-	result[0] = (double)found;
-	result[1] = cost;
+	result[0] = (double)found;			// USED IN OPERATION MANAGER TO CALCULATE SUM OF KEYS FOUND
+	result[1] = cost;					// SAME FOR SUM OF COST, READ OP
 	return result;
 }
 
@@ -193,6 +196,8 @@ void _operation_manager(long int write_count, int read_threads, long int read_co
 	pthread_join(wr_t, NULL);
 
 	cost = wr_arg.cost;
+
+	// FINAL RESULTS OUTPUT STARTS HERE
 	printf(LINE);
 	printf("|Random-Write	(done:%ld): %.6f sec/op; %.1f writes/sec(estimated); cost:%.3f(sec);\n"
 		,write_count, (double)(cost / write_count)
@@ -205,6 +210,11 @@ void _operation_manager(long int write_count, int read_threads, long int read_co
 		(double)(res[1] / read_count),
 		(double)(read_count / res[1]),
 		res[1]);
+	
+	printf(LINE);
+	printf("|Total time elapsed: %.3f(sec)\n", cost+res[1]);
+	
+	// FREEING UP THREADS AND MEMORY
 	__destroy();
 	free(res);
 }

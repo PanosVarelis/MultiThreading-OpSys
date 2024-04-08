@@ -5,7 +5,7 @@
 #include "utils.h"
 #include "log.h"
 
-//PTHREAD DECLARATION
+// MUTEX & SEM'S DECLARATION
 int readcount, writecount = 0;
 pthread_mutex_t mutexBuf;
 sem_t readcount_mutex; 
@@ -54,14 +54,18 @@ void db_close(DB *self)
     free(self);
 }
 
+// SEMAPHORE WAIT
 void __wait(sem_t sem){
     sem_wait(&sem);
 }
 
+// SEMAPHORE POST
 void __signal(sem_t sem){
     sem_post(&sem);
 }
 
+// SEMAPHORE AND MUTEX INITIALISATION
+// CALLED BY kiwi.operation_manager
 void __init(void){
     sem_init(&writecount_mutex, 0, 1);
     sem_init(&write_mutex, 0, 1);
@@ -71,6 +75,8 @@ void __init(void){
     pthread_mutex_init(&mutexBuf, NULL);
 }
 
+// DESTROY SEM's AND MUTEX AFTER END
+// CALLED BY kiwi.operation_manager
 void __destroy(void){
     sem_destroy(&writecount_mutex);
     sem_destroy(&write_mutex);
@@ -80,20 +86,19 @@ void __destroy(void){
     pthread_mutex_destroy(&mutexBuf);
 }
 
+// PRODUCER-CONSUMER IMPLEMENTATION FOR WRITE OP
+// WRITERS HAVE PRIORITY
 int db_add(DB* self, Variant* key, Variant* value)
 {
     int add;
-    __wait(writecount_mutex);
-    writecount ++;
-    if(writecount == 1){
-        // if first writer arrives
-        // block readers
-        __wait(read_mutex);
-    }
-    __signal(writecount_mutex);
+    __wait(writecount_mutex);                   // POSTING SEM FOR SAFE WRITERS COUNTER
+    writecount ++;                              
+    if(writecount == 1){                        // IF FIRST WRITER ARRIVES             
+        __wait(read_mutex);                     // BLOCK READERS                        
+    }                                           
+    __signal(writecount_mutex);                 
     __wait(write_mutex);
-    pthread_mutex_lock(&mutexBuf);
-    // critical area
+    pthread_mutex_lock(&mutexBuf);              // ENTERING CRITICAL AREA, LOCKING MUTEX FOR SST COMPACTION
     if (memtable_needs_compaction(self->memtable))
     {
         INFO("Starting compaction of the memtable after %d insertions and %d deletions",
@@ -101,14 +106,13 @@ int db_add(DB* self, Variant* key, Variant* value)
         sst_merge(self->sst, self->memtable);
         memtable_reset(self->memtable);
     }
+    pthread_mutex_unlock(&mutexBuf);            // END OF COMPACTION, UNLOCKING..
     add = memtable_add(self->memtable, key, value);
-    // critical area end
-    pthread_mutex_unlock(&mutexBuf);
-    __signal(write_mutex);
+    __signal(write_mutex);                      // SAME AS DONE FOR ABOVE, SAFE WR MUTEX DE-INCREMENT
     __wait(writecount_mutex);
-    writecount --;
-    if(writecount == 0){
-        // if first writer finishes
+    writecount --;                              
+    if(writecount == 0){                        // BUT FOR LAST WRITER
+        // if last writer finishes
         // unblock readers
         __signal(read_mutex);
     }
@@ -116,34 +120,35 @@ int db_add(DB* self, Variant* key, Variant* value)
     return add;
 }
 
+// PRODUCER-CONSUMER IMPLEMENTATION FOR READ OP
 int db_get(DB* self, Variant* key, Variant* value)
 {
     int get;
-    __wait(read_mutex2);
+    __wait(read_mutex2);                        
     __wait(read_mutex);
-    __wait(readcount_mutex);
+    __wait(readcount_mutex);                    // SAFE READER'S COUNT INCREMENT
     readcount ++;
-    if(readcount == 0){
+    if(readcount == 1){
         // if first reader arrives 
         // block writer
-        __wait(write_mutex);
+        __wait(write_mutex);                    // BLOCKING WRITERS IF FIRST READER ARRIVES
     }
     __signal(readcount_mutex);
     __signal(read_mutex);
     __signal(read_mutex2);
-    pthread_mutex_lock(&mutexBuf);
+    pthread_mutex_lock(&mutexBuf);              // ENTERING CRITICAL AREA, LOCKING MUTEX..
     // critical area
     if (memtable_get(self->memtable->list, key, value) == 1)
         return 1;
     get = sst_get(self->sst, key, value);
     // critical area end
-    pthread_mutex_unlock(&mutexBuf);
+    pthread_mutex_unlock(&mutexBuf);            // EXITING CRITICAL AREA, UNLOCKING..
     __wait(readcount_mutex);
     readcount --;
-    if(readcount == 0){
+    if(readcount == 0){                         // SAME AS ABOVE, SAFE RD MUTEX DE-INCREMENT
         // if last reader finishes
         // unblock writer
-        __signal(write_mutex);
+        __signal(write_mutex);                  // UNBLOCK WRITERS IF LAST READER DONE
     }
     __signal(readcount_mutex);
     return get;

@@ -6,9 +6,7 @@
 #include "variant.h"
 #include "memtable.h"
 #include "merger.h"
-#include <pthread.h>
 #include <semaphore.h>
-#include <stdbool.h>
 
 
 typedef struct _db {
